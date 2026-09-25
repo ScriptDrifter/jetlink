@@ -177,8 +177,18 @@ JETLINK_BACKEND=ort scripts/run-mac.sh --device ane
 ```
 
 or rebuild the Mac app (`make -C macos app`), which bundles this checkout's
-server, and pick **CoreML with the Neural Engine** in its settings. It is not
-yet measured over USB to a comma, or in a car.
+server, and pick **CoreML with the Neural Engine** in its settings.
+
+Over USB to a comma (the Mac app, hub, USB-A to USB-C cable), zoompilot's
+parked live bench ran every frame after the switch on the Mac, none dropped:
+
+| modeld's frame, 180 s | p50 | p99 | p99.9 | max | over 50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| M1 Pro, USB, `--device ane` split | 35.1 ms | 37.1 ms | 46.1 ms | 134.6 ms | 2 of 3,450 |
+| iPhone 17 Pro, one-cable TCP | 35.1 ms | 39.1 ms | 45.7 ms | 111 ms | 1 of 3,431 |
+
+The Mac's model is slower than the phone's, and its USB link faster. It has
+not been driven.
 
 ## Install the app with Xcode and a free Apple account
 

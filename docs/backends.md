@@ -84,6 +84,11 @@ Where the time went, measured with the same script at 1,200 paced frames:
 | all on the Neural Engine (the iPhone build) | 40.4 / 47.6 ms | 29.1 / 31.5 ms |
 | split: vision on the Neural Engine, policy on the GPU | 44.8 / 53.9 ms | 27.0 / 28.9 ms |
 
+Over USB to a comma, zoompilot's parked live bench
+(`tools/jetlink_live_bench.sh 180`, real cameras and modeld, controls off)
+through the Mac app: 3,450 frames on the large model after the switch, p50
+35.1 ms, p99 37.1, p99.9 46.1, max 134.6, 2 over 50 ms, none dropped.
+
 The split is only faster once the GPU is kept awake between frames. On an
 iPhone the GPU is much slower than the Neural Engine and the phone runs the
 whole model there.
