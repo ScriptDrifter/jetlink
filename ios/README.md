@@ -266,16 +266,17 @@ On a 16 GB M1 Pro, macOS 26.5, with the 766 MB model `09d080f36965bb2a`:
 On an iPhone 17 Pro, the in-app benchmark (1,201 frames at 20 Hz, Release,
 CPU keep-warm on): 17.7 ms mean, 21.5 ms p99, 33.9 ms max a frame, of which
 17.5 ms is the model on the Neural Engine and 0.2 ms the queues. No frame
-over 35 ms; nominal temperature throughout.
+over 35 ms; nominal temperature throughout. The parity gate, run from a Mac
+over Wi-Fi against the phone: first failed on `road_transform` (worst column
+0.9989), and passes with the fp32 heads (every column 0.99954 or better;
+`lane_lines_prob` mean error 0.080 before, 0.009 after).
 
 ## Not yet known
 
 - **The link to the comma**: over Ethernet, and whether the one-cable link
   can be made safe for the comma's power.
-- **Accuracy on the phone's Neural Engine**: the first phone run failed on
-  `road_transform` (0.9989), which the fp32 heads fix on the Mac. Run the
-  parity command from the Benchmark screen again after updating the app.
-  Also re-run the benchmark: the phone's timings above predate this change.
+- **The phone's timings with the fp32 heads**: the numbers above were
+  measured just before that change; re-run the benchmark.
 - **Memory**: the Mac server's peak while building is 3.0 GB; the 1.7 GB
   Lebowski model may not fit an 8 GB phone.
 - **In the car**: heat over a long drive, link drops, and the app being

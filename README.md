@@ -74,8 +74,9 @@ the iPhone build differs in five ways:
   `road_transform`, `pose`, `lane_lines_prob` and the like. On the Neural
   Engine they ran in fp16, and on an iPhone 17 Pro `road_transform` failed
   the accuracy gate (worst column 0.9989, gate 0.999). They now run in fp32,
-  which CoreML places on the GPU or CPU. Computed exactly from the Neural
-  Engine's own vision output, every column scores 0.9996 or better.
+  which CoreML places on the GPU or CPU. The phone now passes the gate:
+  `road_transform`'s worst column is 0.99954, and the error on
+  `lane_lines_prob` fell from 0.080 to 0.009.
 - **The CPU kept ready.** Between frames the CPU drops its clocks, and
   CoreML's share of the next frame then runs slowly. While frames arrive,
   the app keeps one CPU core busy; it stops a second after the last frame.
@@ -123,10 +124,10 @@ Neural Engine setting and 154 ms on the GPU.
 The Neural Engine build passes the accuracy gate with less margin than the
 Mac's own: the error on `lead_prob` roughly doubles, from running the
 policy's LayerNorms in fp16. Moving the small heads to fp32 left the Mac's
-speed where it was (in-process benchmark: 32.4 ms mean, 38.2 ms p99). The
-iPhone numbers above were measured before that change. Re-run the benchmark,
-and check accuracy on your own phone with the command on the app's
-Benchmark screen.
+speed where it was (in-process benchmark: 32.4 ms mean, 38.2 ms p99). On the
+iPhone 17 Pro the accuracy gate passes (every column 0.99954 or better). The
+timings above were measured just before that change. Check your own phone
+with the accuracy command on the app's Benchmark screen.
 
 These changes are not in the Mac app, which runs upstream's Python server.
 
