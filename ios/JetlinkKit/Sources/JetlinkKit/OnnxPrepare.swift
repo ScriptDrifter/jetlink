@@ -394,7 +394,10 @@ public enum OnnxPrepare {
     var wide: [String: String] = [:]
     for w in weights.sorted() where initByName[w]!.dataType == OnnxType.float16 {
       wide[w] = "\(w)__fp32"
-      m.initializers.append(try initByName[w]!.widened(name: "\(w)__fp32", m.file))
+      // layernorm_in_fp32 names its copies the same way; one is enough
+      if initByName["\(w)__fp32"] == nil {
+        m.initializers.append(try initByName[w]!.widened(name: "\(w)__fp32", m.file))
+      }
     }
     var new: [Node] = []
     var cast = Set<String>()

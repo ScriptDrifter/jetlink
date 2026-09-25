@@ -34,8 +34,8 @@ Macs may differ.
 
 The frame budget is 50 ms at 20 frames per second (20 Hz). CoreML on the GPU is
 the default because it meets this budget on the M1 Pro. tinygrad exceeds the
-budget. The Neural Engine option (`--device ane`) has more frames over budget at
-20 Hz, even though it is faster with no pause between requests.
+budget. The table below is the Neural Engine option (`--device ane`) as it was
+first measured; it has since been rebuilt, see [the split](#the-neural-engine-split).
 
 | | tinygrad METAL | CoreML, GPU (`--device coreml`, default) | CoreML, all compute units (`--device ane`) |
 | --- | ---: | ---: | ---: |
@@ -55,6 +55,38 @@ the current model preparation code.
 
 The mean is the average frame time. The p99 is the time at or below which 99% of
 frames complete. The maximum is the slowest frame.
+
+### The Neural Engine split
+
+`--device ane` now runs the vision trunk on the Neural Engine and the policy
+on the GPU, with the Expand-to-Tile and fp32-heads rewrites the iPhone build
+uses, Apple's FastPrediction specialization, the Metal keep-alive for the
+GPU's half, and one CPU core kept busy while frames arrive. On the same
+M1 Pro with model `09d080f36965bb2a`, 2026-09-25, `bench_link.py --rate 20`
+over TCP loopback, 1,190 frames after the engine had loaded:
+
+| | CoreML, all compute units (`--device ane`), the split |
+| --- | ---: |
+| round trip at 20 Hz, mean / p99 / max | 28.2 / 31.8 / 67.0 ms |
+| frames over the 50 ms budget | 1 of 1,190 |
+| server side: model / queues | 26.4 / 1.1 ms |
+| parity gate, worst column | 0.99956 pass |
+| parity, mean error on `plan` / `lead_prob` | 0.0054 / 0.0141 |
+| build in a fresh process | 38 s |
+
+A run started while the engine was still loading had a 283 ms frame and 12
+over budget; the comma only switches to the large model once it answers.
+
+Where the time went, measured with the same script at 1,200 paced frames:
+
+| M1 Pro, 20 Hz, mean / p99 | Without the helpers | With the CPU and GPU helpers |
+| --- | ---: | ---: |
+| all on the Neural Engine (the iPhone build) | 40.4 / 47.6 ms | 29.1 / 31.5 ms |
+| split: vision on the Neural Engine, policy on the GPU | 44.8 / 53.9 ms | 27.0 / 28.9 ms |
+
+The split is only faster once the GPU is kept awake between frames. On an
+iPhone the GPU is much slower than the Neural Engine and the phone runs the
+whole model there.
 
 ### How to measure
 

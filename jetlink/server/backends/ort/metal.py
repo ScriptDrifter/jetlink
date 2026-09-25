@@ -222,12 +222,15 @@ class MetalKeepAlive:
 def create_keepalive(sessions: list[tuple[str, list]]) -> MetalKeepAlive | None:
   if sys.platform != 'darwin' or os.environ.get('JETLINK_METAL_KEEPALIVE', '1') == '0':
     return None
-  # The ANE path has different power/performance behavior. Only enable this
-  # for the CPUAndGPU configuration measured with a paced frame stream.
+  # The GPU path (CPUAndGPU), and the `ane` device (ALL), whose policy runs
+  # on the GPU. On an M1 Pro at 20 Hz the `ane` session measured 44.8 ms mean
+  # and 53.9 p99 without it, 27.0 and 28.9 with it and the CPU keep-warm
+  # (cpuwarm.py), 2026-09-25. A session on the CPU or the Neural Engine alone
+  # has no GPU work to keep warm.
   units = [p[1].get('MLComputeUnits') if isinstance(p, tuple) else None
            for _, providers in sessions for p in providers
            if (p[0] if isinstance(p, tuple) else p) == 'CoreMLExecutionProvider']
-  if not units or any(unit != 'CPUAndGPU' for unit in units):
+  if not units or any(unit not in ('CPUAndGPU', 'ALL') for unit in units):
     return None
   try:
     return MetalKeepAlive()

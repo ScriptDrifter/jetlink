@@ -3,13 +3,16 @@
 This is a fork of [zoompilot/jetlink](https://github.com/zoompilot/jetlink)
 that adds **Jetlink for iPhone**: an iOS app that runs openpilot's large
 (chestnut) driving models on an iPhone's Neural Engine and serves them to a
-comma. Everything upstream (the Mac app, Jetson, Linux) is unchanged and
+comma. It also speeds up the Mac server's Neural Engine mode
+([below](#the-mac-server-vision-on-the-neural-engine-policy-on-the-gpu)).
+Everything else upstream (the Mac app, Jetson, Linux) is unchanged and
 documented [below](#jetlink-upstream).
 
-> **Experimental, and not yet driven.** The app runs the model within
-> budget on an iPhone 17 Pro, but the link from the phone to the comma has
-> not been validated, and nothing here has been tested in a car. The comma's
-> small model drives whenever the link is down.
+> **Experimental.** The app runs the model within budget on an iPhone 17
+> Pro, and over one USB cable zoompilot's parked live bench ran every frame
+> on the phone. It has been driven once, for about 30 minutes, and the phone
+> slowed as it heated up. The comma's small model drives whenever the link
+> is down.
 
 - [What this fork adds](#what-this-fork-adds)
 - [How the iPhone app works](#how-the-iphone-app-works)
@@ -131,11 +134,11 @@ Neural Engine setting and 154 ms on the GPU.
 **M1 Pro Mac**, the same model, through the server with upstream's own
 `bench_link.py` and `verify_parity.py`:
 
-| | Python server, GPU (upstream) | Swift server, Neural Engine |
-| --- | ---: | ---: |
-| Round trip at 20 Hz, mean / p99 | 47.9 / 64.3 ms | 32.5 / 36.9 ms |
-| Frames over 50 ms | 38 of 390 (9.7%) | 0 of 1,190 |
-| Accuracy gate (every output column correlated at 0.999 or better) | passes | passes (worst column 0.99956) |
+| | Python server, GPU (upstream) | Swift server, Neural Engine | Python server, `--device ane` split (this fork) |
+| --- | ---: | ---: | ---: |
+| Round trip at 20 Hz, mean / p99 | 47.9 / 64.3 ms | 32.5 / 36.9 ms | 28.2 / 31.8 ms |
+| Frames over 50 ms | 38 of 390 (9.7%) | 0 of 1,190 | 1 of 1,190 |
+| Accuracy gate (every output column correlated at 0.999 or better) | passes | passes (worst column 0.99956) | passes (worst column 0.99956) |
 
 The Neural Engine build passes the accuracy gate with less margin than the
 Mac's own: the error on `lead_prob` roughly doubles, from running the
@@ -145,7 +148,37 @@ iPhone 17 Pro the accuracy gate passes (every column 0.99954 or better). The
 timings above were measured just before that change. Check your own phone
 with the accuracy command on the app's Benchmark screen.
 
-These changes are not in the Mac app, which runs upstream's Python server.
+### The Mac server: vision on the Neural Engine, policy on the GPU
+
+On a Mac the fastest arrangement is a split, not all on the Neural Engine:
+the vision network on the Neural Engine and the policy on the GPU. It only
+pays off with the GPU kept awake between frames. At 20 frames a second on
+the M1 Pro, 1,200 frames each:
+
+| | Without the keep-alives | With them |
+| --- | ---: | ---: |
+| All on the Neural Engine (the iPhone build) | 40.4 / 47.6 ms | 29.1 / 31.5 ms |
+| Split | 44.8 / 53.9 ms | **27.0 / 28.9 ms** |
+
+(mean / p99.) On an iPhone the GPU is far slower than the Neural Engine, so
+the phone keeps the whole model on the Neural Engine.
+
+The Python server's `--device ane` mode, which the Mac app offers as "CoreML
+with the Neural Engine", now does this: the iPhone build's Expand-to-Tile and
+fp32-heads rewrites, the policy on the GPU, FastPrediction, the Metal
+keep-alive, and one CPU core kept busy while frames arrive. An engine built
+by the old mode is rebuilt on its first load. Details are in
+[docs/backends.md](docs/backends.md#the-neural-engine-split).
+
+To use it over USB from this checkout:
+
+```bash
+JETLINK_BACKEND=ort scripts/run-mac.sh --device ane
+```
+
+or rebuild the Mac app (`make -C macos app`), which bundles this checkout's
+server, and pick **CoreML with the Neural Engine** in its settings. It is not
+yet measured over USB to a comma, or in a car.
 
 ## Install the app with Xcode and a free Apple account
 
