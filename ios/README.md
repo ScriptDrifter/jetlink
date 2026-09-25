@@ -6,8 +6,8 @@ protocol as the Jetson and Mac servers, over TCP, so the comma's side is
 zoompilot's existing `JetlinkEndpoint` mode.
 
 **Status: experimental. Not yet driven.** On an iPhone 17 Pro (A19 Pro) the
-766 MB model runs in 21 ms on the Neural Engine and the in-app benchmark
-passes the 50 ms budget. The link to the comma is not working yet: see
+766 MB model takes 17.7 ms a frame on the Neural Engine at 20 frames a
+second, 21.5 ms p99, with no frame over 35 ms in a minute. The link to the comma is not working yet: see
 [Connecting to the comma](#connecting-to-the-comma).
 
 ## What you need
@@ -256,8 +256,10 @@ On a 16 GB M1 Pro, macOS 26.5, with the 766 MB model `09d080f36965bb2a`:
 - `swift test` runs 23 tests, including the whole protocol over TCP against
   the Python reference.
 
-On an iPhone 17 Pro: the model runs in 21.2 ms mean, 24.3 ms p99 on the
-Neural Engine, and the benchmark passes.
+On an iPhone 17 Pro, the in-app benchmark (1,201 frames at 20 Hz, Release,
+CPU keep-warm on): 17.7 ms mean, 21.5 ms p99, 33.9 ms max a frame, of which
+17.5 ms is the model on the Neural Engine and 0.2 ms the queues. No frame
+over 35 ms; nominal temperature throughout.
 
 ## Not yet known
 

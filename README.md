@@ -86,14 +86,23 @@ less, because it does the same work for much less power.
 
 The comma allows 50 ms per frame, cable included.
 
-**iPhone 17 Pro (A19 Pro)**, 766 MB model, the in-app benchmark at 20 frames
-a second:
+**iPhone 17 Pro (A19 Pro)**, 766 MB model, the in-app benchmark: 1,201
+frames at 20 a second over 60 seconds, Release build, CPU keep-warm on:
 
-| | Neural Engine | GPU |
-| --- | ---: | ---: |
-| The model itself, mean / p99 | 21.2 / 24.3 ms | |
-| Whole frame, p99, first build (policy on the GPU) | 66 ms | 154 ms |
-| Whole frame, current build | passes the 50 ms budget | not used |
+| Current build, Neural Engine | mean | p99 | max |
+| --- | ---: | ---: | ---: |
+| Whole frame (the phone's share) | 17.7 ms | 21.5 ms | 33.9 ms |
+| The model on the Neural Engine | 17.5 ms | 21.3 ms | 33.8 ms |
+| History queues | 0.2 ms | 0.3 ms | 0.6 ms |
+| Frames over 35 ms / over 50 ms | 0 | 0 | |
+
+The phone stayed at nominal temperature, and every 10-second window had a
+p99 between 17.4 and 23.2 ms. That leaves about 30 ms of the budget for the
+cable, which is not yet measured. A 10-minute run shows whether it holds as
+the phone warms.
+
+The first build, with the policy on the GPU, measured 66 ms p99 on the
+Neural Engine setting and 154 ms on the GPU.
 
 **M1 Pro Mac**, the same model, through the server with upstream's own
 `bench_link.py` and `verify_parity.py`:
