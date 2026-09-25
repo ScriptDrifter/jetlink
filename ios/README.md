@@ -29,8 +29,10 @@ A free Apple ID is enough to run the app on your own phone.
    and let the phone restart. The switch appears once the phone has been
    plugged into a Mac with Xcode open.
 2. In Xcode > Settings > Accounts, add your Apple ID. It shows as a
-   "Personal Team"; its ten-character team ID is under Manage Certificates,
-   or in the error Xcode gives before step 3.
+   "Personal Team". To find its ten-character team ID, choose that team once
+   under the Jetlink target's Signing & Capabilities, then
+   `grep -m1 DEVELOPMENT_TEAM ios/Jetlink.xcodeproj/project.pbxproj`, and
+   `git checkout ios/Jetlink.xcodeproj` to undo the change.
 3. Create `ios/Config/Local.xcconfig` with your team and a bundle identifier
    of your own. Git ignores this file, so your team never lands in a commit:
 
