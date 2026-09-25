@@ -19,6 +19,7 @@ drops while engaged, the comma soft-disables and tells you to take over. See
 ## Quick start
 
 Choose your computer: **[Mac](#mac)** · **[Jetson](#jetson)** · **[CUDA laptop](#cuda-laptop)**.
+An iPhone app is in development: see [ios/README.md](ios/README.md). It runs the model on an iPhone 17 Pro's Neural Engine within budget; the link to the comma and driving are not yet tested.
 Then follow the shared [comma setup](#comma-setup-all-platforms).
 
 You need a **comma 3X or comma 4**, a **USB 3 A-to-C data cable**, and

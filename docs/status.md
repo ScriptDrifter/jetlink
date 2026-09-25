@@ -15,6 +15,10 @@ temperature, or failure condition.
 - **Linux NVIDIA (CUDA laptop):** hardware-tested.
 - **Windows WSL2:** implemented, not yet tested on hardware.
 - **CPU:** functional testing only.
+- **iPhone:** experimental. The model runs in 21 ms on an iPhone 17 Pro's
+  Neural Engine and the Swift server passes the parity gate on an M1 Pro.
+  The link to the comma and driving are not yet tested. See
+  [ios/README.md](../ios/README.md).
 
 ## Measured performance
 
