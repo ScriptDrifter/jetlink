@@ -1,3 +1,22 @@
+diff --git a/openpilot/sunnypilot/accelerators/jetlink/gadget.py b/openpilot/sunnypilot/accelerators/jetlink/gadget.py
+index ef451d3..094744f 100644
+--- a/openpilot/sunnypilot/accelerators/jetlink/gadget.py
++++ b/openpilot/sunnypilot/accelerators/jetlink/gadget.py
+@@ -236,7 +236,14 @@ def wait_for_host(timeout: float, bounce=None, should_stop=None, report=None) ->
+   the bus and stopped. The UDC then sits in default or addressed with the CC
+   pin still showing a host, and only another connect moves it: that is what
+   `bounce` is for, and it is spent once.
++
++  Over TCP there is nothing to enumerate: the connect that made the client
++  already reached the far end, and no gadget of ours is bound. Waiting on one
++  stalled every modeld join for CONNECT_TIMEOUT and then started over, so the
++  large model never joined.
+   """
++  if link_endpoint() is not None:
++    return True
+   deadline = time.monotonic() + timeout
+   stalled_since = None
+   bounced = False
 diff --git a/openpilot/sunnypilot/accelerators/jetlink/lending.py b/openpilot/sunnypilot/accelerators/jetlink/lending.py
 index 5ce1d34..6696d26 100644
 --- a/openpilot/sunnypilot/accelerators/jetlink/lending.py
@@ -50,6 +69,46 @@ index a6f99f7..8ad8259 100644
          return
        return self.spawn_worker(why)
  
+diff --git a/openpilot/sunnypilot/accelerators/jetlink/tests/test_backend.py b/openpilot/sunnypilot/accelerators/jetlink/tests/test_backend.py
+index 6f3ffa4..3846491 100644
+--- a/openpilot/sunnypilot/accelerators/jetlink/tests/test_backend.py
++++ b/openpilot/sunnypilot/accelerators/jetlink/tests/test_backend.py
+@@ -41,6 +41,10 @@ class ClockedTest(unittest.TestCase):
+       p = mock.patch.object(module, 'time', self.clock)
+       self.addCleanup(p.stop)
+       p.start()
++    # USB unless a test says otherwise, whatever the machine's params hold
++    p = mock.patch.object(gadget, 'link_endpoint', mock.Mock(return_value=None))
++    self.addCleanup(p.stop)
++    p.start()
+ 
+   def bus(self, udc: str, cc: bool = True):
+     # gadget, not helpers: the primitives live there and everything that reads
+@@ -106,6 +110,24 @@ class WaitForHost(ClockedTest):
+     assert helpers.wait_for_host(backend.CONNECT_TIMEOUT, should_stop=lambda: True) is False
+     assert self.clock.slept == 0.0
+ 
++  def test_over_tcp_there_is_no_host_to_wait_for(self):
++    # The connect already reached the phone or Jetson; no gadget of ours is
++    # bound, so the UDC would never say configured.
++    self.bus('not attached', cc=False)
++    gadget.link_endpoint.return_value = ('192.168.60.2', 5599)
++    said = []
++    assert helpers.wait_for_host(backend.CONNECT_TIMEOUT, report=lambda: said.append(True)) is True
++    assert self.clock.slept == 0.0
++    assert said == []
++
++  def test_a_join_over_tcp_returns_the_client_at_once(self):
++    self.bus('not attached', cc=False)
++    gadget.link_endpoint.return_value = ('192.168.60.2', 5599)
++    link = mock.Mock()
++    link.open.return_value = client = mock.Mock()
++    assert backend._connect_patiently(link) is client
++    assert self.clock.slept == 0.0
++
+   def test_the_wait_says_once_that_it_is_waiting(self):
+     self.bus('powered')
+     said = []
 diff --git a/openpilot/sunnypilot/accelerators/jetlink/tests/test_lending.py b/openpilot/sunnypilot/accelerators/jetlink/tests/test_lending.py
 index 9c3f28b..9fe82fd 100644
 --- a/openpilot/sunnypilot/accelerators/jetlink/tests/test_lending.py

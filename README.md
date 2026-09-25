@@ -294,6 +294,12 @@ Ethernet, and it has these limitations:
   Without the warp, modeld never switches to the large model. A comma that
   already compiled its warp while using a Mac or Jetson over USB can still
   switch during a drive. A fresh setup never does.
+- **The large model never joins a drive.** Before modeld uses a new
+  connection, it waits for a Jetson to finish attaching over USB
+  (`wait_for_host`). Over TCP nothing attaches over USB, so every attempt
+  waited 45 seconds, gave up and started over. modeld stayed on the small
+  model, stuck in `joining`. This showed up in zoompilot's parked bench
+  (`tools/jetlink_live_bench.sh`) with the phone on the link.
 - **Every connection waits 8 seconds first.** Before connecting, zoompilot
   asks the gadget owner to lend it the USB endpoints (`lending.py`). Over
   TCP there are none, so it waits out the 8-second timeout every time.
@@ -305,10 +311,22 @@ Ethernet, and it has these limitations:
   to be started by hand after every reboot, and is blocked by the power
   problem above.
 
-`ios/comma/zoompilot-tcp-provisioning.patch` fixes the first two (14 lines
-in `owner.py` and `lending.py`, plus tests). zoompilot's owner and lending
-tests pass with it (50 tests), and its 5 new tests fail without it. It
-applies cleanly to `jetson-trt` at `bcb49d7`.
+`ios/comma/zoompilot-tcp-provisioning.patch` fixes the first three (21
+lines in `owner.py`, `lending.py` and `gadget.py`, plus tests). With it,
+107 of zoompilot's backend, gadget, owner, lending and jetlinkd tests pass,
+and its 7 new tests fail without it. The other 3 are warp tests that need
+openpilot's hardware module, which the test machine did not have; they fail
+the same way with or without the patch. It applies cleanly to `jetson-trt`
+at `bcb49d7`.
+
+If you applied the earlier version of the patch, undo it with the old
+file, then apply the new one:
+
+```bash
+ssh comma@<comma-ip> 'cd /data/openpilot && git apply -R /data/zoompilot-tcp-provisioning.patch'
+scp ios/comma/zoompilot-tcp-provisioning.patch comma@<comma-ip>:/data/
+ssh comma@<comma-ip> 'cd /data/openpilot && git apply /data/zoompilot-tcp-provisioning.patch'
+```
 
 ### Applying the patch on the comma
 

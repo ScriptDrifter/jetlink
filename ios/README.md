@@ -92,10 +92,14 @@ In TCP mode zoompilot's gadget owner never starts the parked provisioning
 run, because it waits for a gadget that TCP mode never presents. That run
 records the engine as ready, drives the home icon, and compiles the camera
 warp; without the warp, modeld never takes the large model. Every borrow of
-the endpoints also waited out an 8 s timeout first.
-`comma/zoompilot-tcp-provisioning.patch` fixes both, in `owner.py` and
-`lending.py`, with tests. The fork's owner and lending tests pass with it
-(50), and its new tests fail without it.
+the endpoints also waited out an 8 s timeout first. And modeld's join waited
+for a Jetson to finish attaching over USB (`gadget.wait_for_host`) even over
+TCP, where nothing does: 45 s, then start over, so the large model never
+joined. `comma/zoompilot-tcp-provisioning.patch` fixes all three, in
+`owner.py`, `lending.py` and `gadget.py`, with tests. 107 of the fork's
+backend, gadget, owner, lending and jetlinkd tests pass with it, and its 7
+new tests fail without it. The other 3 are warp tests that need openpilot's
+hardware module; they fail the same way either way.
 
 Apply it to the fork, or for a quick test on the comma itself, with updates
 off so the updater does not reset it:
