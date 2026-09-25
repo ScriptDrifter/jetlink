@@ -292,40 +292,35 @@ reboots. Through the hub's USB-A port it never does, because a USB-A port
 can only supply power. A hub with power pass-through lets the phone charge.
 This route has kept the comma up; the link over it is not yet measured.
 
-With the zoompilot patch applied ([below](#zoompilot-jetson-trt-limitations-and-the-patch)),
-over SSH on the comma:
+With the zoompilot patch applied ([below](#zoompilot-jetson-trt-limitations-and-the-patch)):
 
-1. Copy the script over from this checkout, once:
-   `scp ios/comma/setup_net_gadget.sh comma@<comma's address>:/data/`
-2. Point the comma at the phone, once (it persists):
+1. On the comma: **Settings > Models**, turn **Accelerator Link** on and
+   **Accelerator on iPhone** on. Both only change while parked. The comma
+   swaps its USB port over to the network adapter by itself, now and at every
+   boot, with the comma at `192.168.60.1`. No SSH.
+2. On the iPhone, the first time: **Settings > Ethernet**, tap the new
+   adapter, **Configure IP > Manual**: address `192.168.60.2`, subnet mask
+   `255.255.255.0`, Router empty. iOS remembers this for the adapter; if the
+   comma comes up as a new adapter after a reboot, set it again.
+3. Open Jetlink. The Status tab shows **Comma: Connected** once the comma
+   connects; while parked it only connects to check the model, so the lasting
+   connection comes with a drive or zoompilot's live bench.
 
-   ```bash
-   echo -n 192.168.60.2:5599 > /data/params/d/JetlinkEndpoint
-   ```
+To go back to a Mac or Jetson over USB, turn **Accelerator on iPhone** off
+while parked: the comma removes the network adapter and presents jetlink's
+own USB gadget again.
 
-3. Turn **Settings > Models > Accelerator Link** off.
-4. After every boot, with the cable plugged in:
-
-   ```bash
-   sudo bash /data/setup_net_gadget.sh
-   ```
-
-   It releases jetlink's own USB gadget, which zoompilot sets up at boot,
-   and presents the network adapter with the comma at `192.168.60.1`.
-5. On the iPhone: **Settings > Ethernet**, tap the new adapter, **Configure
-   IP > Manual**: address `192.168.60.2`, subnet mask `255.255.255.0`, Router
-   empty. iOS remembers this for the adapter. Check from the comma with
-   `ping -c 3 192.168.60.2`.
-6. Measure the link, still with Accelerator Link off: the Benchmark
-   screen's "Over the link, from the comma" command.
-7. Turn **Accelerator Link** back on. The app's Status tab shows **Comma:
-   Connected**, and the comma's home-button icon pulses, then turns green.
+To measure the link with the phone on it, turn Accelerator Link off and run
+the Benchmark screen's "Over the link, from the comma" command over SSH.
 
 **Or Ethernet:** a USB-C Ethernet adapter on the comma (Realtek
 RTL8152/8153 or ASIX AX88179), a hub with Ethernet on the iPhone, and a
-network cable. Instead of step 4, give the comma's adapter the address,
-with its name from `ip link`:
-`sudo ip addr add 192.168.60.1/24 dev <adapter> && sudo ip link set <adapter> up`.
+network cable. Leave **Accelerator on iPhone** off and use another subnet,
+set by hand, so the comma does not present its USB network adapter on a port
+that is hosting the Ethernet adapter:
+`echo -n 192.168.61.2:5599 > /data/params/d/JetlinkEndpoint`, then
+`sudo ip addr add 192.168.61.1/24 dev <adapter> && sudo ip link set <adapter> up`
+(the adapter's name from `ip link`), and give the phone `192.168.61.2`.
 
 Keep Jetlink open and on screen while driving: iOS suspends background apps.
 The app keeps the screen awake while it serves.
@@ -365,17 +360,24 @@ Ethernet, and it has these limitations:
 - **The order of steps matters.** Setting `JetlinkEndpoint` while zoompilot
   already holds the USB port doesn't release it; turning Accelerator Link
   off and on does.
-- **No USB network link at boot.** zoompilot's boot script sets up only its
-  own USB gadget, which iPhones cannot use. The one-cable network link has
-  to be started by hand after every reboot, and is blocked by the power
-  problem above.
+- **No switch between a Mac and an iPhone.** zoompilot's boot script sets
+  up only its own USB gadget, which iPhones cannot use, and nothing swaps it
+  for the network adapter.
 
-`ios/comma/zoompilot-tcp-provisioning.patch` fixes the first three (21
-lines in `owner.py`, `lending.py` and `gadget.py`, plus tests). With it,
-107 of zoompilot's backend, gadget, owner, lending and jetlinkd tests pass,
-and its 7 new tests fail without it. The other 3 are warp tests that need
-openpilot's hardware module, which the test machine did not have; they fail
-the same way with or without the patch. It applies cleanly to `jetson-trt`
+`ios/comma/zoompilot-tcp-provisioning.patch` fixes all five. It adds an
+**Accelerator on iPhone** toggle to both models panels (mici and tici),
+beside Accelerator Link. On, it points the link at the phone
+(`192.168.60.2:5599`); the gadget owner (`owner.py`) then swaps the USB port
+to the network adapter (`net_gadget.sh`, this repo's
+`ios/comma/setup_net_gadget.sh`), at boot and whenever the toggle changes,
+and back to jetlink's gadget when it goes off. It never swaps while the link
+is in use, and the toggle only writes while parked. With the patch, 121 of
+zoompilot's backend, gadget, owner, lending and jetlinkd tests pass,
+including 21 new ones, which fail without it where they test a change. The
+panels themselves are not tested here: zoompilot's UI tests need a raylib
+window. Three more are warp tests that need openpilot's hardware module,
+which the test machine did not have; they fail the same way with or without
+the patch. It applies cleanly to `jetson-trt`
 at `bcb49d7`.
 
 If you applied the earlier version of the patch, undo it with the old

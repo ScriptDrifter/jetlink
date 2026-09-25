@@ -95,11 +95,16 @@ warp; without the warp, modeld never takes the large model. Every borrow of
 the endpoints also waited out an 8 s timeout first. And modeld's join waited
 for a Jetson to finish attaching over USB (`gadget.wait_for_host`) even over
 TCP, where nothing does: 45 s, then start over, so the large model never
-joined. `comma/zoompilot-tcp-provisioning.patch` fixes all three, in
-`owner.py`, `lending.py` and `gadget.py`, with tests. 107 of the fork's
-backend, gadget, owner, lending and jetlinkd tests pass with it, and its 7
-new tests fail without it. The other 3 are warp tests that need openpilot's
-hardware module; they fail the same way either way.
+joined. And nothing swapped the USB port between jetlink's gadget and the
+iPhone's network adapter. `comma/zoompilot-tcp-provisioning.patch` fixes
+all four: `owner.py`, `lending.py` and `gadget.py`, an **Accelerator on
+iPhone** toggle in both models panels, and `net_gadget.sh` (a copy of
+`comma/setup_net_gadget.sh`), which the owner runs to present the adapter at
+boot and when the toggle turns on, and with `--teardown` when it turns off.
+121 of the fork's backend, gadget, owner, lending and jetlinkd tests pass
+with it, 21 of them new. The other 3 are warp tests that need openpilot's
+hardware module; they fail the same way either way. The panels are not
+tested here (their tests need a raylib window).
 
 Apply it to the fork, or for a quick test on the comma itself, with updates
 off so the updater does not reset it:
@@ -109,25 +114,25 @@ cd /data/openpilot && git apply /data/zoompilot-tcp-provisioning.patch
 echo -n 1 > /data/params/d/DisableUpdates
 ```
 
-### Order of the steps
+### Switching between a Mac and the iPhone
 
-The owner does not let go of a gadget it already holds when the endpoint
-changes, so:
-
-1. `echo -n 192.168.60.2:5599 > /data/params/d/JetlinkEndpoint`
-2. Settings > Models > Accelerator Link **off**, which releases the port.
-3. Bring the link up (below).
-4. On the iPhone: Settings > Ethernet > (the adapter) > Configure IP >
-   Manual, `192.168.60.2`, subnet mask `255.255.255.0`, no router. Check
-   from the comma with `ping -c 3 192.168.60.2`.
-5. Accelerator Link **on**. The app shows Comma: Connected.
+Settings > Models on the comma, parked: **Accelerator on iPhone** on points
+the link at `192.168.60.2:5599` and the owner presents the USB network
+adapter; off, it removes the adapter and presents jetlink's gadget for a Mac
+or Jetson. The owner does it at boot too, and never while the link is in
+use. The first time, give the phone its address: Settings > Ethernet > (the
+adapter) > Configure IP > Manual, `192.168.60.2`, subnet mask
+`255.255.255.0`, no router.
 
 ### The link
 
-**Ethernet (recommended).** A USB-C Ethernet adapter on the comma (Realtek
+**Ethernet.** A USB-C Ethernet adapter on the comma (Realtek
 RTL8152/8153 or ASIX AX88179; AGNOS has those drivers), a USB-C hub with
 Ethernet and power pass-through on the phone, and a cable between them. Give
-the comma's adapter `192.168.60.1/24`. No power flows between the two.
+the comma's adapter an address by hand, on another subnet than the
+iPhone toggle's (`192.168.61.1/24`, the endpoint `192.168.61.2:5599`), so
+the comma does not also present its USB network adapter. No power flows
+between the two.
 
 **One USB cable, through a hub.** The comma presents itself as a USB
 network adapter (CDC-NCM) with `comma/setup_net_gadget.sh`. On a comma with
@@ -139,8 +144,8 @@ with no crash message, which is a power loss rather than a software fault.
 Over a C-to-C cable the two negotiate who powers whom, and the comma ended
 up supplying the phone. iPhone > USB-C hub > USB-A to USB-C cable > comma
 keeps the comma up: a USB-A port only supplies power, so the comma never
-sources it. Whether iOS then brings the adapter up, and the link's speed,
-are not yet measured.
+sources it. Over it, zoompilot's parked live bench ran every frame on the
+phone (35.1 ms median, 39.1 p99).
 
 The script releases jetlink's own FunctionFS gadget, which zoompilot sets up
 at boot and which holds the port. Its teardown leaves "error: gadget torn
@@ -154,9 +159,8 @@ sudo bash setup_net_gadget.sh              # the adapter, as 192.168.60.1
 sudo bash setup_net_gadget.sh --teardown
 ```
 
-The gadget does not survive a reboot. Bringing it up at boot, in place of
-the FunctionFS gadget whenever `JetlinkEndpoint` is set, is the fork change
-to make once the cable works.
+By hand these are for a comma without the patch; with it, the owner runs the
+same script, and the adapter comes back at every boot.
 
 ### Speed over the link
 
