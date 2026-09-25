@@ -125,7 +125,7 @@ RTL8152/8153 or ASIX AX88179; AGNOS has those drivers), a USB-C hub with
 Ethernet and power pass-through on the phone, and a cable between them. Give
 the comma's adapter `192.168.60.1/24`. No power flows between the two.
 
-**One USB cable (not working yet).** The comma presents itself as a USB
+**One USB cable, through a hub.** The comma presents itself as a USB
 network adapter (CDC-NCM) with `comma/setup_net_gadget.sh`. On a comma with
 AGNOS kernel 4.9.103, `--check` found NCM built in
 (`CONFIG_USB_CONFIGFS_NCM=y`). But plugging an iPhone into the comma's USB-C
@@ -133,10 +133,16 @@ port rebooted the comma: its charger logged "Weak charger detected" and
 "Reverse boost detected", and the kernel log stopped at a Type-C change
 with no crash message, which is a power loss rather than a software fault.
 Over a C-to-C cable the two negotiate who powers whom, and the comma ended
-up supplying the phone. Untested ideas: an iPhone > USB-C-to-A adapter >
-A-to-C cable > comma chain, which makes the phone the host and stops it
-drawing from the comma; and how the comma itself is powered on the bench.
-Ethernet avoids the question.
+up supplying the phone. iPhone > USB-C hub > USB-A to USB-C cable > comma
+keeps the comma up: a USB-A port only supplies power, so the comma never
+sources it. Whether iOS then brings the adapter up, and the link's speed,
+are not yet measured.
+
+The script releases jetlink's own FunctionFS gadget, which zoompilot sets up
+at boot and which holds the port. Its teardown leaves "error: gadget torn
+down" in `/dev/shm/jetlink-gadget`, and zoompilot reads any error there as
+no link at all, TCP endpoint included, so the script clears it once its own
+gadget is up.
 
 ```bash
 sudo bash setup_net_gadget.sh --check      # changes nothing; says whether NCM exists

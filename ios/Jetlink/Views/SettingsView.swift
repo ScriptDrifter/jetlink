@@ -115,7 +115,7 @@ struct ConnectionHelpView: View {
           Text("One USB cable").font(.headline)
           Text(
             """
-            The comma can present itself as a USB network adapter, but plugging an iPhone straight into it has rebooted a comma: over a C-to-C cable the comma ended up powering the phone. Use Ethernet until that is solved.
+            The comma can present itself as a USB network adapter. Plugged straight into the iPhone, the comma tries to power the phone and reboots, so go through a hub: iPhone, USB-C hub, USB-A to USB-C cable, comma. On the comma, set JetlinkEndpoint and turn Accelerator Link off as above, then after every boot run ios/comma/setup_net_gadget.sh as root. Set the phone's address as in step 3, then turn Accelerator Link back on.
             """)
         }
         Group {

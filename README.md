@@ -221,48 +221,52 @@ apps installed on a device at once.
 
 ## Connect it to the comma
 
-**Use Ethernet for now:**
-- a USB-C Ethernet adapter on the comma (Realtek RTL8152/8153 or ASIX
-  AX88179; AGNOS has drivers for these);
-- a USB-C hub with Ethernet and power pass-through on the iPhone, so it can
-  charge;
-- a network cable between them.
+**One cable, through a hub** (the comma stays up this way):
 
-No power flows between the two devices this way.
+```
+iPhone -> USB-C hub -> USB-A to USB-C cable -> comma
+```
 
-A single USB-C cable is possible in principle: the comma presents itself as
-a USB network adapter, which iOS supports. On a comma with AGNOS kernel
-4.9.103, `ios/comma/setup_net_gadget.sh --check` found that support built
-in. But **plugging an iPhone straight into the comma rebooted the comma.**
-Its log showed the two devices negotiating power, with the comma trying to
-power the phone, then a power loss. Until that is solved, don't use a
-direct USB-C connection.
+The comma presents itself as a USB network adapter, which iOS drives
+itself. Plugged straight into the phone, the comma tries to power it and
+reboots. Through the hub's USB-A port it never does, because a USB-A port
+can only supply power. A hub with power pass-through lets the phone charge.
+This route has kept the comma up; the link over it is not yet measured.
 
-With the zoompilot patch applied ([next section](#zoompilot-jetson-trt-limitations-and-the-patch)),
+With the zoompilot patch applied ([below](#zoompilot-jetson-trt-limitations-and-the-patch)),
 over SSH on the comma:
 
-1. Point the comma at the phone:
+1. Copy the script over from this checkout, once:
+   `scp ios/comma/setup_net_gadget.sh comma@<comma's address>:/data/`
+2. Point the comma at the phone, once (it persists):
 
    ```bash
    echo -n 192.168.60.2:5599 > /data/params/d/JetlinkEndpoint
    ```
 
-2. Turn **Settings > Models > Accelerator Link** off. This releases the
-   comma's USB port. Do it after step 1, because zoompilot does not let go
-   of a port it already holds when the endpoint changes.
-3. Give the comma's Ethernet adapter an address. Find the adapter's name
-   with `ip link` (it appears when you plug the adapter in), then:
+3. Turn **Settings > Models > Accelerator Link** off.
+4. After every boot, with the cable plugged in:
 
    ```bash
-   sudo ip addr add 192.168.60.1/24 dev <adapter> && sudo ip link set <adapter> up
+   sudo bash /data/setup_net_gadget.sh
    ```
 
-   This lasts until the comma reboots.
-4. On the iPhone: **Settings > Ethernet**, tap the adapter, **Configure IP >
-   Manual**: address `192.168.60.2`, subnet mask `255.255.255.0`, Router
-   empty. Check from the comma with `ping -c 3 192.168.60.2`.
-5. Turn **Accelerator Link** back on. The app's Status tab shows **Comma:
+   It releases jetlink's own USB gadget, which zoompilot sets up at boot,
+   and presents the network adapter with the comma at `192.168.60.1`.
+5. On the iPhone: **Settings > Ethernet**, tap the new adapter, **Configure
+   IP > Manual**: address `192.168.60.2`, subnet mask `255.255.255.0`, Router
+   empty. iOS remembers this for the adapter. Check from the comma with
+   `ping -c 3 192.168.60.2`.
+6. Measure the link, still with Accelerator Link off: the Benchmark
+   screen's "Over the link, from the comma" command.
+7. Turn **Accelerator Link** back on. The app's Status tab shows **Comma:
    Connected**, and the comma's home-button icon pulses, then turns green.
+
+**Or Ethernet:** a USB-C Ethernet adapter on the comma (Realtek
+RTL8152/8153 or ASIX AX88179), a hub with Ethernet on the iPhone, and a
+network cable. Instead of step 4, give the comma's adapter the address,
+with its name from `ip link`:
+`sudo ip addr add 192.168.60.1/24 dev <adapter> && sudo ip link set <adapter> up`.
 
 Keep Jetlink open and on screen while driving: iOS suspends background apps.
 The app keeps the screen awake while it serves.

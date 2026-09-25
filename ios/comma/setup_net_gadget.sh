@@ -12,13 +12,22 @@
 # it 192.168.60.1, and the comma's TCP client reaches the phone at
 # 192.168.60.2 over the cable.
 #
-# NOT YET VALIDATED ON A COMMA. It needs a kernel with the NCM or ECM gadget
-# function (CONFIG_USB_CONFIGFS_NCM or _ECM) and fails with that reason if
-# there is none. Run as root, with the jetlink FunctionFS gadget torn down:
+# NOT YET VALIDATED WITH AN IPHONE. It needs a kernel with the NCM or ECM
+# gadget function (CONFIG_USB_CONFIGFS_NCM or _ECM) and fails with that
+# reason if there is none. With zoompilot's JetlinkEndpoint set and its
+# Accelerator Link off, run as root after every boot:
 #
-#   sudo scripts/setup_gadget.sh --teardown
-#   sudo ios/comma/setup_net_gadget.sh
 #   echo -n 192.168.60.2:5599 > /data/params/d/JetlinkEndpoint
+#   sudo bash setup_net_gadget.sh
+#
+# zoompilot sets up jetlink's own FunctionFS gadget at boot, which holds the
+# port. This releases it, and clears the "gadget torn down" error its
+# teardown leaves in /dev/shm/jetlink-gadget: zoompilot reads any error
+# there as "no link", and would not try the TCP endpoint either.
+#
+# Plug an iPhone straight into the comma and the comma tries to power it and
+# reboots. Go through a hub on the phone and a USB-A to USB-C cable to the
+# comma: the A end can only supply power, so the comma never sources it.
 #
 # then on the iPhone: Settings > Ethernet > (the new adapter) > Configure IP >
 # Manual, address 192.168.60.2, subnet mask 255.255.255.0, no router.
@@ -44,6 +53,9 @@ PHONE_ADDR=${JETLINK_PHONE_ADDR:-192.168.60.2}
 # NCM first: it batches packets, which a 460 KB frame benefits from. ECM is
 # the older class and the fallback.
 FUNCTIONS=${JETLINK_NET_FUNCTIONS:-"ncm ecm"}
+# jetlink's own FunctionFS gadget, as zoompilot carries it, and its status file
+JETLINK_REPO=${JETLINK_REPO:-/data/openpilot/jetlink_repo}
+FFS_STATUS=/dev/shm/jetlink-gadget
 
 status() {
   { echo "$1" > "$STATUS_FILE" && chmod 0644 "$STATUS_FILE"; } 2>/dev/null || true
@@ -157,13 +169,19 @@ shopt -u nullglob
 [[ ${#udcs[@]} -gt 0 ]] || fail "no USB device controller in /sys/class/udc; this device cannot act as a USB gadget"
 UDC=${JETLINK_UDC:-$(basename "${udcs[0]}")}
 
-# Refuse to fight another gadget for the controller, jetlink's own included.
+# jetlink's own gadget, which zoompilot sets up at boot, is released; any
+# other gadget holding the controller is someone else's and left alone.
 for other in "$CONFIGFS"/usb_gadget/*/UDC; do
   if [[ -e "$other" ]]; then
     owner=$(basename "$(dirname "$other")")
     bound=$(cat "$other" 2>/dev/null || true)
-    if [[ "$owner" != "jetlink-net" && -n "$bound" ]]; then
-      fail "USB gadget '$owner' already holds the device controller ($bound); tear it down first (scripts/setup_gadget.sh --teardown for jetlink's)"
+    if [[ "$owner" == "jetlink" && -n "$bound" ]]; then
+      echo "jetlink-net: releasing jetlink's USB gadget (turn Accelerator Link off first)"
+      [[ -f "$JETLINK_REPO/scripts/setup_gadget.sh" ]] || fail "jetlink's gadget holds the port, and there is no $JETLINK_REPO/scripts/setup_gadget.sh to tear it down; set JETLINK_REPO"
+      bash "$JETLINK_REPO/scripts/setup_gadget.sh" --teardown >/dev/null 2>&1 || true
+      [[ -z "$(cat "$other" 2>/dev/null || true)" ]] || fail "jetlink's USB gadget would not let go of the port; turn Accelerator Link off and try again"
+    elif [[ "$owner" != "jetlink-net" && -n "$bound" ]]; then
+      fail "USB gadget '$owner' already holds the device controller ($bound); tear it down first"
     fi
   fi
 done
@@ -228,6 +246,11 @@ ip addr add "$COMMA_ADDR" dev "$ifname"
 ip link set "$ifname" up
 
 status ok
+# jetlink's teardown leaves "error: gadget torn down" behind, which zoompilot
+# reads as no link at all. The link is this gadget now.
+if grep -qs "torn down" "$FFS_STATUS"; then
+  rm -f "$FFS_STATUS"
+fi
 echo "USB network gadget ($chosen) bound to $UDC as $ifname, comma at $COMMA_ADDR"
 echo "on the iPhone: Settings > Ethernet > Configure IP > Manual, $PHONE_ADDR / 255.255.255.0"
 echo "on the comma:  echo -n $PHONE_ADDR:5599 > /data/params/d/JetlinkEndpoint"
