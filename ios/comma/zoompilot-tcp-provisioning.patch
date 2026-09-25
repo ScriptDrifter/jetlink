@@ -1,0 +1,137 @@
+diff --git a/openpilot/sunnypilot/accelerators/jetlink/lending.py b/openpilot/sunnypilot/accelerators/jetlink/lending.py
+index 5ce1d34..6696d26 100644
+--- a/openpilot/sunnypilot/accelerators/jetlink/lending.py
++++ b/openpilot/sunnypilot/accelerators/jetlink/lending.py
+@@ -128,6 +128,10 @@ def borrow(name: str = 'modeld', timeout: float = BORROW_TIMEOUT, path: Path = S
+   on, or whose daemon died: the caller opens the gadget itself, as it always
+   did, so a drive never loses the large model to a daemon fault.
+   """
++  if gadget.link_endpoint() is not None:
++    # Over TCP there are no endpoints to lend and nobody holds any: asking
++    # would only wait out the timeout on "retry" before connecting anyway.
++    return None
+   deadline = time.monotonic() + timeout
+   try:
+     conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+diff --git a/openpilot/sunnypilot/accelerators/jetlink/owner.py b/openpilot/sunnypilot/accelerators/jetlink/owner.py
+index a6f99f7..8ad8259 100644
+--- a/openpilot/sunnypilot/accelerators/jetlink/owner.py
++++ b/openpilot/sunnypilot/accelerators/jetlink/owner.py
+@@ -156,6 +156,11 @@ class Owner:
+       self.next_attempt = time.monotonic() + RECONNECT_BACKOFF
+       return False
+ 
++  @staticmethod
++  def over_tcp() -> bool:
++    """Is the server reached over TCP (JetlinkEndpoint), not the gadget?"""
++    return gadget.link_endpoint() is not None
++
+   def ensure_gadget(self) -> bool:
+     """Is there a gadget to present? Create it if boot did not.
+ 
+@@ -329,7 +334,7 @@ class Owner:
+     if reason is not None and not self.lender.lent:
+       self.stop_worker()
+       self.wake()
+-      if self.open_link():
++      if self.over_tcp() or self.open_link():
+         return self.spawn_worker(f'the jetson has to be shut down: {reason}')
+       return
+ 
+@@ -365,7 +370,10 @@ class Owner:
+       if not self.ensure_gadget():
+         return
+       self.wake()
+-      if not self.open_link():
++      # Over TCP the run connects by itself; there is no gadget to present
++      # first, and waiting for one meant a parked comma never provisioned,
++      # recorded the engine ready, or compiled its warp.
++      if not self.over_tcp() and not self.open_link():
+         return
+       return self.spawn_worker(why)
+ 
+diff --git a/openpilot/sunnypilot/accelerators/jetlink/tests/test_lending.py b/openpilot/sunnypilot/accelerators/jetlink/tests/test_lending.py
+index 9c3f28b..9fe82fd 100644
+--- a/openpilot/sunnypilot/accelerators/jetlink/tests/test_lending.py
++++ b/openpilot/sunnypilot/accelerators/jetlink/tests/test_lending.py
+@@ -38,6 +38,11 @@ class LendingTest(unittest.TestCase):
+     self.addCleanup(p.stop)
+     self.udc = 'udc0'
+     p.start()
++    # the link is the gadget unless a test says otherwise, whatever this
++    # machine's own params hold
++    self.endpoint = mock.patch.object(lending.gadget, 'link_endpoint', mock.Mock(return_value=None))
++    self.addCleanup(self.endpoint.stop)
++    self.endpoint.start()
+ 
+   def lender(self) -> lending.Lender:
+     lender = lending.Lender(lambda: self.free, self.bounce, path=self.path)
+@@ -94,6 +99,14 @@ class Borrowing(LendingTest):
+     t.join(3.0)
+     assert got and got[0] is not None
+ 
++  def test_over_tcp_there_is_nothing_to_borrow_and_nobody_is_asked(self):
++    lender = self.lender()
++    with mock.patch.object(lending.gadget, 'link_endpoint', return_value=('192.168.60.2', 5599)):
++      t0 = time.monotonic()
++      assert self.take(timeout=3.0) is None
++      assert time.monotonic() - t0 < 0.5, 'waited on a lender over TCP'
++    assert not lender.lent, 'the owner was asked for endpoints it does not have'
++
+   def test_a_borrow_nobody_can_answer_gives_up_and_says_so(self):
+     self.free = False
+     lender = self.lender()
+diff --git a/openpilot/sunnypilot/accelerators/jetlink/tests/test_owner.py b/openpilot/sunnypilot/accelerators/jetlink/tests/test_owner.py
+index 12a8d17..ca16bb2 100644
+--- a/openpilot/sunnypilot/accelerators/jetlink/tests/test_owner.py
++++ b/openpilot/sunnypilot/accelerators/jetlink/tests/test_owner.py
+@@ -342,6 +342,49 @@ class TestTheToggle(OwnerTest):
+       self.assertIsNone(o.transport)
+ 
+ 
++class TestEthernet(OwnerTest):
++  """With JetlinkEndpoint set there is no gadget, and runs start without one."""
++
++  def owner(self, **kw):
++    o = super().owner(presented=False, **kw)
++    o.open_link.return_value = False   # what open_link answers over TCP
++    return o
++
++  def setUp(self):
++    super().setUp()
++    p = mock.patch.object(gadget, 'link_endpoint', mock.Mock(return_value=('192.168.60.2', 5599)))
++    self.addCleanup(p.stop)
++    p.start()
++
++  def test_the_first_look_of_the_boot_runs_without_a_gadget(self):
++    o = self.owner()
++    o.seen = {}
++    o.step()
++    o.spawn_worker.assert_called_once()
++    o.open_link.assert_not_called()
++
++  def test_a_new_pick_starts_a_run_without_a_gadget(self):
++    o = self.owner()
++    o.step()
++    o.spawn_worker.assert_not_called()
++    self.write('ModelManager_ActiveBundleChestnut', b'{"ref": "c" * 40}')
++    o.step()
++    o.spawn_worker.assert_called_once()
++
++  def test_a_shutdown_request_starts_a_run_without_a_gadget(self):
++    o = self.owner()
++    gadget.SHUTDOWN_REQUEST.write_text(json.dumps({'reason': 'car battery'}))
++    o.step()
++    o.spawn_worker.assert_called_once()
++
++  def test_onroad_it_starts_nothing(self):
++    o = self.owner()
++    o.seen = {}
++    self.write('IsOffroad', b'0')
++    o.step()
++    o.spawn_worker.assert_not_called()
++
++
+ class TestSetup(OwnerTest):
+   def test_a_gadget_boot_did_not_make_is_created(self):
+     o = self.owner(presented=False)
