@@ -140,7 +140,7 @@ struct BenchmarkView: View {
     else { return nil }
     return """
       python3 scripts/verify_parity.py capture --host \(ip) --port \(settings.port) --sha256 \(sha) --nbytes \(n) --dir parity-iphone \
-      && python3 scripts/verify_parity.py reference --onnx MODEL.onnx --dir parity-iphone \
+      && python3 scripts/verify_parity.py reference --onnx "$HOME/Library/Application Support/Jetlink/cache/models/\(sha.prefix(16)).onnx" --dir parity-iphone \
       && python3 scripts/verify_parity.py compare --dir parity-iphone
       """
   }
@@ -156,7 +156,7 @@ struct BenchmarkView: View {
       Text("Accuracy, from your Mac")
     } footer: {
       Text(
-        "Checks that this phone's \(model.engine.units?.label ?? "accelerator") computes what onnxruntime does on a computer, the same gate the Mac server passes. Run it in the jetlink checkout on a Mac on the same Wi-Fi, with MODEL.onnx replaced by the model's file. Wi-Fi is slow, but this test does not care. It should end with OK."
+        "Checks that this phone's \(model.engine.units?.label ?? "accelerator") computes what onnxruntime does on a computer, the same gate the Mac server passes. Run it in the jetlink checkout on a Mac on the same Wi-Fi. It reads the model where the Mac app keeps it; if your copy of the .onnx is elsewhere, change the path after --onnx. Wi-Fi is slow, but this test does not care. It should end with OK."
       )
     }
   }

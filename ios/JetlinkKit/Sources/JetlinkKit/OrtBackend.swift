@@ -48,7 +48,7 @@ public final class OrtBackend: Sendable {
   public let name = "ort"
   /// Bumped whenever OnnxPrepare changes what it writes, so an artifact
   /// prepared by an older app is rebuilt rather than trusted.
-  public static let prepareVersion = 2
+  public static let prepareVersion = 3
   static let manifestName = "sessions.json"
   /// The last resort for the compile stage's fraction; see the Python backend.
   static let expectedCoreMLSeconds = 10.0

@@ -208,6 +208,13 @@ Differences from the Python server:
   LayerNorm is unchanged by the scale up to epsilon, and the scale keeps the
   fp16 squares in range: the inputs reach 1,189, whose square overflows
   fp16. 99.5% of the estimated cost lands on the Neural Engine.
+- **The small heads in fp32.** The layers between the end of the vision
+  trunk and the output (24 nodes, 4 MB of weights in the 766 MB model) are
+  cast to fp32, so CoreML places them on the GPU or CPU. In fp16 on an
+  iPhone 17 Pro's Neural Engine, `road_transform` failed the parity gate
+  (worst column 0.9989). Computed exactly from the Neural Engine's own
+  vision output, every column is 0.9996 or better. The Mac's speed did
+  not change.
 - **A CPU core kept busy on the Neural Engine path** while frames arrive.
   Paced at 20 Hz, the CPU's clocks drop between frames and CoreML's side of
   each prediction runs slowly; keeping the CPU busy took p99 from 54 to
@@ -243,7 +250,7 @@ On a 16 GB M1 Pro, macOS 26.5, with the 766 MB model `09d080f36965bb2a`:
 
   | | GPU | Neural Engine |
   | --- | ---: | ---: |
-  | worst column correlation | 0.99957 | 0.99957 |
+  | worst column correlation | 0.99957 | 0.99956 |
   | mean error, `plan` / `lead_prob` | 0.0046 / 0.0150 | 0.0073 / 0.0346 |
   | round trip at 20 Hz, mean / p99 | 48.0 / 60.2 ms | 32.5 / 36.9 ms |
   | frames over 50 ms | 9.7% (Python server, same Mac) | 0 of 1,190 |
@@ -265,8 +272,10 @@ over 35 ms; nominal temperature throughout.
 
 - **The link to the comma**: over Ethernet, and whether the one-cable link
   can be made safe for the comma's power.
-- **Accuracy on the phone's Neural Engine**: run the parity command from the
-  Benchmark screen.
+- **Accuracy on the phone's Neural Engine**: the first phone run failed on
+  `road_transform` (0.9989), which the fp32 heads fix on the Mac. Run the
+  parity command from the Benchmark screen again after updating the app.
+  Also re-run the benchmark: the phone's timings above predate this change.
 - **Memory**: the Mac server's peak while building is 3.0 GB; the 1.7 GB
   Lebowski model may not fit an 8 GB phone.
 - **In the car**: heat over a long drive, link drops, and the app being

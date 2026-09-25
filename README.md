@@ -60,7 +60,7 @@ preparation produces the same model, protobuf field for field, as upstream's
 leaves part of the model to the GPU. Apple's CoreML placement report showed
 the model split in two, with the whole policy half on the GPU. That is cheap
 on a Mac and slow on a phone, whose GPU measured 154 ms p99 on its own. So
-the iPhone build differs in four ways:
+the iPhone build differs in five ways:
 
 - **One piece, on the Neural Engine.** Two `Expand` ops CoreML would not
   take are rewritten as the equivalent `Tile`s, so the model is one CoreML
@@ -69,6 +69,13 @@ the iPhone build differs in four ways:
   scaled input, and the scale keeps fp16 from overflowing: those inputs
   reach 1,189, whose square is past fp16's maximum of 65,504. 99.5% of the
   model's estimated cost now runs on the Neural Engine.
+- **The small heads in fp32.** Between the end of the vision network and
+  the output are a few small layers (24 nodes, 4 MB of weights) that make
+  `road_transform`, `pose`, `lane_lines_prob` and the like. On the Neural
+  Engine they ran in fp16, and on an iPhone 17 Pro `road_transform` failed
+  the accuracy gate (worst column 0.9989, gate 0.999). They now run in fp32,
+  which CoreML places on the GPU or CPU. Computed exactly from the Neural
+  Engine's own vision output, every column scores 0.9996 or better.
 - **The CPU kept ready.** Between frames the CPU drops its clocks, and
   CoreML's share of the next frame then runs slowly. While frames arrive,
   the app keeps one CPU core busy; it stops a second after the last frame.
@@ -111,12 +118,15 @@ Neural Engine setting and 154 ms on the GPU.
 | --- | ---: | ---: |
 | Round trip at 20 Hz, mean / p99 | 47.9 / 64.3 ms | 32.5 / 36.9 ms |
 | Frames over 50 ms | 38 of 390 (9.7%) | 0 of 1,190 |
-| Accuracy gate (every output column correlated at 0.999 or better) | passes | passes |
+| Accuracy gate (every output column correlated at 0.999 or better) | passes | passes (worst column 0.99956) |
 
 The Neural Engine build passes the accuracy gate with less margin than the
 Mac's own: the error on `lead_prob` roughly doubles, from running the
-policy's LayerNorms in fp16. Check your own phone with the accuracy command
-on the app's Benchmark screen.
+policy's LayerNorms in fp16. Moving the small heads to fp32 left the Mac's
+speed where it was (in-process benchmark: 32.4 ms mean, 38.2 ms p99). The
+iPhone numbers above were measured before that change. Re-run the benchmark,
+and check accuracy on your own phone with the command on the app's
+Benchmark screen.
 
 These changes are not in the Mac app, which runs upstream's Python server.
 

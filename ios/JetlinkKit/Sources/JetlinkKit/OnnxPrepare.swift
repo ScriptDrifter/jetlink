@@ -18,6 +18,8 @@
 //
 //   expand_to_tile             keeps the graph one CoreML partition
 //   prescale_layernorm         LayerNorm(x / 8) in fp16, on the Neural Engine
+//   heads_in_fp32              the small heads at the end of the vision trunk
+//                              in fp32, off the Neural Engine
 //
 // Each pass does what its Python original does, in the same order, with the
 // same names for everything it adds, so ios/scripts/check_prepare.py can hold
@@ -36,6 +38,10 @@ let passthroughOps: Set<String> = ["Contiguous"]
 /// What the policy's LayerNorm inputs are divided by on the Neural Engine;
 /// see ios/scripts/ane_passes.py.
 let layernormPrescale = 8
+/// The ops headsInFP32 moves into fp32, and how many nodes it will move at
+/// most; see ios/scripts/ane_passes.py.
+let headOps: Set<String> = ["Gemm", "MatMul", "LayerNormalization", "Gelu", "Add", "Sub", "Mul", "Div", "Relu", "Sigmoid", "Tanh"]
+let headMaxNodes = 64
 /// A weight smaller than this stays a MatMul; see onnx_patch.BLOB_MIN_ELEMENTS.
 let blobMinElements: Int64 = 1024
 /// The metadata key onnxruntime's CoreML provider keys its compile cache on.
@@ -48,6 +54,7 @@ public struct PrepareReport: Sendable, CustomStringConvertible {
   public var norms = 0
   public var gemms = 0
   public var tiles = 0
+  public var heads = 0
   /// What the convert stage writes towards: the initializers' bytes.
   public var weightsBytes = 0
 
@@ -55,7 +62,7 @@ public struct PrepareReport: Sendable, CustomStringConvertible {
     "stripped \(stripped) tinygrad op(s), \(retyped ? "images retyped to fp16" : "inputs left as declared"), "
       + "\(gathers) negative Gather index(es) normalized, "
       + "\(gemms) MatMul+Add rewritten as Gemm(transB=1), \(tiles) Expand(s) as Tile, "
-      + "\(norms) LayerNormalization(s) pre-scaled by 1/\(layernormPrescale)"
+      + "\(norms) LayerNormalization(s) pre-scaled by 1/\(layernormPrescale), \(heads) head node(s) in fp32"
   }
 }
 
@@ -80,8 +87,10 @@ public enum OnnxPrepare {
     r.gemms = forCoreML ? try gemmWithTransposedWeight(m) : 0
     if forANE {
       r.tiles = try expandToTile(m)
-      let policy = Set(m.nodes.map(\.nameOrEmpty)).subtracting(try visionNodes(m))
+      let vision = try visionNodes(m)
+      let policy = Set(m.nodes.map(\.nameOrEmpty)).subtracting(vision)
       r.norms = try prescaleLayerNorm(m, only: policy)
+      r.heads = try headsInFP32(m, vision: vision)
     }
     r.weightsBytes = m.initializers.reduce(0) { $0 + $1.rawBytes }
     if let cacheKey {
@@ -327,6 +336,105 @@ public enum OnnxPrepare {
     return done
   }
 
+  /// The indices, in graph order, of the heads that end the vision trunk:
+  /// the largest set of vision nodes with ops in headOps whose outputs are
+  /// all read, and read only, by each other or by a Concat that makes a graph
+  /// output. Empty when there is no such Concat or the set is too big.
+  static func visionHeads(_ m: OnnxModel, vision: Set<String>) -> [Int] {
+    let outputs = Set(m.outputs.map(\.name))
+    let ends = Set(m.nodes.indices.filter { m.nodes[$0].opType == "Concat" && m.nodes[$0].outputs.contains(where: outputs.contains) })
+    if ends.isEmpty { return [] }
+    var readers: [String: Set<Int>] = [:]
+    for (i, n) in m.nodes.enumerated() {
+      for x in n.inputs { readers[x, default: []].insert(i) }
+    }
+    var region = Set<Int>()
+    var grew = true
+    while grew {
+      grew = false
+      for i in m.nodes.indices.reversed() {
+        let n = m.nodes[i]
+        if region.contains(i) || !vision.contains(n.nameOrEmpty) || !headOps.contains(n.opType)
+          || n.outputs.contains(where: outputs.contains)
+        {
+          continue
+        }
+        let inside = region.union(ends)
+        if n.outputs.allSatisfy({ o in readers[o].map { !$0.isEmpty && $0.isSubset(of: inside) } ?? false }) {
+          region.insert(i)
+          grew = true
+        }
+      }
+    }
+    return region.count <= headMaxNodes ? region.sorted() : []
+  }
+
+  /// Runs visionHeads in fp32: what they read from the trunk cast up, their
+  /// fp16 weights as fp32 copies, and what they hand the output Concat cast
+  /// back down. The Neural Engine cannot run fp32, so CoreML places them on
+  /// the GPU or CPU; in fp16 there, road_transform fails the parity gate.
+  /// Returns how many nodes moved.
+  static func headsInFP32(_ m: OnnxModel, vision: Set<String>) throws -> Int {
+    let index = visionHeads(m, vision: vision)
+    if index.isEmpty { return 0 }
+    let heads = Set(index)
+    let initByName = m.initializerMap
+    let produced = Set(index.flatMap { m.nodes[$0].outputs })
+    let entries = Set(index.flatMap { m.nodes[$0].inputs }.filter { !$0.isEmpty && initByName[$0] == nil && !produced.contains($0) })
+    let (_, types) = m.staticInfo()
+    for x in entries.sorted() {
+      guard let t = types[x] else { throw OnnxError("the model does not record the type of \(x), which its heads read") }
+      if t != OnnxType.float16 { return 0 }
+    }
+    let weights = Set(index.flatMap { m.nodes[$0].inputs }.filter { initByName[$0] != nil })
+    if weights.contains(where: { ![OnnxType.float16, OnnxType.float].contains(initByName[$0]!.dataType) }) { return 0 }
+    var readOutside = Set<String>()
+    for (j, n) in m.nodes.enumerated() where !heads.contains(j) { readOutside.formUnion(n.inputs) }
+    let exits = produced.intersection(readOutside)
+    var wide: [String: String] = [:]
+    for w in weights.sorted() where initByName[w]!.dataType == OnnxType.float16 {
+      wide[w] = "\(w)__fp32"
+      m.initializers.append(try initByName[w]!.widened(name: "\(w)__fp32", m.file))
+    }
+    var new: [Node] = []
+    var cast = Set<String>()
+    for (j, var n) in m.nodes.enumerated() {
+      guard heads.contains(j) else {
+        new.append(n)
+        continue
+      }
+      for (i, x) in n.inputs.enumerated() {
+        if entries.contains(x) {
+          if cast.insert(x).inserted {
+            new.append(
+              Node(opType: "Cast", inputs: [x], outputs: ["\(x)__fp32"], name: "\(x)__cast_fp32",
+                attributes: [.int("to", Int64(OnnxType.float))]))
+          }
+          n.inputs[i] = "\(x)__fp32"
+        } else if exits.contains(x) {
+          n.inputs[i] = "\(x)__fp32"
+        } else if let w = wide[x] {
+          n.inputs[i] = w
+        }
+      }
+      let back = n.outputs.filter(exits.contains)
+      n.outputs = n.outputs.map { exits.contains($0) ? "\($0)__fp32" : $0 }
+      new.append(n)
+      for o in back {
+        new.append(
+          Node(opType: "Cast", inputs: ["\(o)__fp32"], outputs: [o], name: "\(o)__cast_fp16",
+            attributes: [.int("to", Int64(OnnxType.float16))]))
+      }
+    }
+    m.nodes = new
+    // The fp16 originals, unless something outside the heads reads them too.
+    m.initializers.removeAll { wide[$0.name] != nil && !readOutside.contains($0.name) }
+    // What the heads compute inside is fp32 now; the value infos said fp16.
+    let inside = produced.subtracting(exits)
+    m.valueInfo.removeAll { inside.contains($0.name) }
+    return index.count
+  }
+
   // MARK: gemm_with_transposed_weight
 
   /// Rewrites MatMul(x, W) + Add(b) as Gemm(x, W.T, b, transB=1), with the
@@ -454,6 +562,54 @@ extension Initializer {
     case OnnxType.uint8, 3, 9: 1  // int8, bool
     default: nil
     }
+  }
+
+  /// This float16 tensor as a float32 one named `name`, as numpy's astype
+  /// makes it. Converted while the model is written when the values are in
+  /// the source file.
+  func widened(name: String, _ file: MappedFile) throws -> Initializer {
+    guard dataType == OnnxType.float16 else { throw OnnxError("\(self.name) is not float16") }
+    if external { throw OnnxError("\(self.name) keeps its data in an external file") }
+    let n = count
+    if let raw {
+      guard raw.count == n * 2 else { throw OnnxError("\(self.name): raw_data is \(raw.count) bytes for \(n) float16") }
+      let src = raw.lowerBound
+      return Initializer(
+        name: name, dims: dims, dataType: OnnxType.float,
+        data: .lazy(n * 4) { w in
+          // raw_data sits wherever protobuf put it; the conversion wants it aligned.
+          let half = UnsafeMutablePointer<Float16>.allocate(capacity: max(n, 1))
+          let out = UnsafeMutablePointer<Float>.allocate(capacity: max(n, 1))
+          defer {
+            half.deallocate()
+            out.deallocate()
+          }
+          UnsafeMutableRawPointer(half).copyMemory(from: file.base + src, byteCount: n * 2)
+          Convert.f16ToF32(half, out, count: n)
+          try w.write(UnsafeRawBufferPointer(start: out, count: n * 4))
+        })
+    }
+    // Written by an earlier pass, or kept as int32_data.
+    var bits: [UInt16]
+    if case .message(let msg) = field.payload, case .raw(let c)? = msg.first(F.tensorRawData)?.payload {
+      var bytes: [UInt8]
+      switch c {
+      case .source(let r): bytes = Array(UnsafeRawBufferPointer(start: file.base + r.lowerBound, count: r.count))
+      case .bytes(let b): bytes = b
+      case .lazy(_, let produce):
+        var w = ProtoWriter(memory: file)
+        try produce(&w)
+        bytes = w.memory
+      }
+      guard bytes.count == n * 2 else { throw OnnxError("\(self.name): raw_data is \(bytes.count) bytes for \(n) float16") }
+      bits = bytes.withUnsafeBytes { b in (0..<n).map { UInt16(littleEndian: b.loadUnaligned(fromByteOffset: 2 * $0, as: UInt16.self)) } }
+    } else {
+      bits = try float16Bits(file)
+    }
+    var out = [UInt8]()
+    out.reserveCapacity(n * 4)
+    for b in bits { withUnsafeBytes(of: Float(Float16(bitPattern: b)).bitPattern.littleEndian) { out.append(contentsOf: $0) } }
+    return Initializer(name: name, dims: dims, dataType: OnnxType.float, data: .bytes(out))
   }
 
   /// This 2-D weight transposed, produced a tensor at a time while the model

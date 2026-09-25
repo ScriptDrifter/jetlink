@@ -15,7 +15,11 @@ preparation, not just the ones one real driving model happens to take:
                     one already fp32), MatMul+Add at rank 2, 3 and 4, and the
                     MatMuls that must be left alone (no Add, a small weight,
                     an Add that is not a bias); for the Neural Engine, an
-                    Expand that becomes a Tile and one that must not
+                    Expand that becomes a Tile and one that must not, and
+                    heads off the vision trunk that go to fp32 (a MatMul+Add
+                    the Gemm rewrite transposes, a plain MatMul, a weight
+                    the policy reads too, a tensor read inside the heads
+                    and by the output Concat)
   sunnypilot layout tests/tiny_model.py: a Cast per image input, a
                     passthrough in the middle
 
@@ -32,6 +36,7 @@ from pathlib import Path
 
 import numpy as np
 import onnx
+import onnxruntime as ort
 from onnx import TensorProto, helper, numpy_helper
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,6 +70,10 @@ def comma_layout() -> onnx.ModelProto:
     'eshape': np.array([1, 1, 4, 1], np.int64),
     'uaxis': np.array([2], np.int64),
     'eshape_up': np.array([2, 1, 64], np.int64),
+    'raxes': np.array([1], np.int64),
+    'hs': f16([64], 1), 'hb': f16([64]),
+    'hW1': f16([64, 128]), 'hb1': f16([128]),
+    'hW2': f16([128, 64]),
   }
   nodes = [
     helper.make_node('Concat', ['img', 'big_img'], ['cat'], axis=1, name='cat'),
@@ -103,15 +112,25 @@ def comma_layout() -> onnx.ModelProto:
     helper.make_node('Expand', ['g3u', 'eshape'], ['ex'], name='ex'),
     # ...one that broadcasts a lower-rank input stays an Expand
     helper.make_node('Expand', ['g1', 'eshape_up'], ['ex2'], name='ex2'),
+    # heads off the vision trunk, read only by each other and the output
+    helper.make_node('ReduceMean', ['vout', 'raxes'], ['vm'], keepdims=0, name='vm'),
+    helper.make_node('LayerNormalization', ['vm', 'hs', 'hb'], ['hln'], axis=-1, epsilon=1e-5, name='hln'),
+    helper.make_node('MatMul', ['hln', 'hW1'], ['h1mm'], name='h1mm'),
+    helper.make_node('Add', ['h1mm', 'hb1'], ['h1'], name='h1'),
+    helper.make_node('Gelu', ['h1'], ['hg'], approximate='tanh', name='hg'),
+    helper.make_node('MatMul', ['hg', 'hW2'], ['h2'], name='h2'),
+    helper.make_node('Add', ['h2', 'vm'], ['hres'], name='hres'),
+    helper.make_node('Mul', ['hres', 's'], ['hsc'], name='hsc'),
   ]
   flat = []
   for name in ('m2', 'm3', 'small', 'notbias', 'm5', 'g2', 'ex', 'ex2'):
-    nodes.append(helper.make_node('Flatten', [name], [f'{name}_f'], axis=1, name=f'{name}_flat'))
+    # ex2 broadcast its batch to 2; flattened whole, it still concatenates.
+    nodes.append(helper.make_node('Flatten', [name], [f'{name}_f'], axis=0 if name == 'ex2' else 1, name=f'{name}_flat'))
     flat.append(f'{name}_f')
-  nodes.append(helper.make_node('Concat', flat, ['pre'], axis=1, name='pre'))
+  nodes.append(helper.make_node('Concat', flat + ['hres', 'hsc'], ['pre'], axis=1, name='pre'))
   # a layout hint feeding the graph output: the output has to keep its name
   nodes.append(helper.make_node('Contiguous', ['pre'], ['outputs'], domain='org.tinygrad', name='hint'))
-  n_out = 32 + 3 * 32 + 8 + 32 + 2 * 15 * 16 + 30 + 3 * 4 * 64 + 2 * 64
+  n_out = 32 + 3 * 32 + 8 + 32 + 2 * 15 * 16 + 30 + 3 * 4 * 64 + 2 * 64 + 2 * 64
   graph = helper.make_graph(
     nodes, 'variants',
     [helper.make_tensor_value_info('img', T.UINT8, [1, 12, 4, 8]),
@@ -167,6 +186,20 @@ def main() -> int:
         if diff is not None:
           print(diff)
           failed += 1
+      # Every build computes what the CPU build does: a pass that retypes a
+      # tensor and misses a reader leaves a model onnxruntime refuses.
+      cpu = ort.InferenceSession(str(tmp / f'{src.stem}.cpu.swift.onnx'), providers=['CPUExecutionProvider'])
+      feed = {i.name: rng.integers(0, 256, [d or 1 for d in i.shape]).astype(np.float16) if i.name in ('img', 'big_img')
+              else rng.standard_normal([d or 1 for d in i.shape]).astype(np.float16) for i in cpu.get_inputs()}
+      want = np.asarray(cpu.run(None, feed)[0], np.float32)
+      for device in ('coreml', 'ane'):
+        got = ort.InferenceSession(str(tmp / f'{src.stem}.{device}.swift.onnx'), providers=['CPUExecutionProvider'])
+        err = float(np.abs(np.asarray(got.run(None, feed)[0], np.float32) - want).max())
+        scale = float(np.abs(want).max())
+        bad = not err <= 0.02 * max(1.0, scale)
+        print(f"{src.stem:10} {device:6} on the CPU against the cpu build: "
+              f"max abs error {err:.4f} of {scale:.1f}{'  <-- FAIL' if bad else ''}")
+        failed += bad
   return 1 if failed else 0
 
 
