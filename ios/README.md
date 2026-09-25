@@ -283,8 +283,9 @@ over Wi-Fi against the phone: first failed on `road_transform` (worst column
 
 ## Not yet known
 
-- **The link to the comma**: over Ethernet, and whether the one-cable link
-  can be made safe for the comma's power.
+- **The link over Ethernet.** The one-cable link through a hub works
+  parked: in zoompilot's live bench, modeld ran every frame on the phone,
+  35.1 ms median and 39.1 ms p99.
 - **The phone's timings with the fp32 heads**: the numbers above were
   measured just before that change; re-run the benchmark.
 - **Memory**: the Mac server's peak while building is 3.0 GB; the 1.7 GB

@@ -105,9 +105,21 @@ frames at 20 a second over 60 seconds, Release build, CPU keep-warm on:
 | Frames over 35 ms / over 50 ms | 0 | 0 | |
 
 The phone stayed at nominal temperature, and every 10-second window had a
-p99 between 17.4 and 23.2 ms. That leaves about 30 ms of the budget for the
-cable, which is not yet measured. A 10-minute run shows whether it holds as
+p99 between 17.4 and 23.2 ms. A 10-minute run shows whether it holds as
 the phone warms.
+
+**With the comma, over one cable** (iPhone > USB-C hub > USB-A to USB-C
+cable > comma, the comma as a USB network adapter), parked:
+
+| | median | p99 | max |
+| --- | ---: | ---: | ---: |
+| `bench_link.py`: round trip, 1,190 frames at 20 Hz | 35.2 ms | 46.5 ms | 60.7 ms |
+| zoompilot's live bench: modeld's frame, 3,431 frames over 180 s | 35.1 ms | 39.1 ms | 111 ms |
+
+In the live bench the comma's real cameras and modeld ran with controls
+off. Every frame came from the large model on the phone, with none dropped
+and one over 50 ms. The comma's own small model takes 24.9 ms a frame there.
+About 19 ms of each round trip is the cable, which runs at USB 2.0 speed.
 
 The first build, with the policy on the GPU, measured 66 ms p99 on the
 Neural Engine setting and 154 ms on the GPU.

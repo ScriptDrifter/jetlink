@@ -17,7 +17,8 @@ temperature, or failure condition.
 - **CPU:** functional testing only.
 - **iPhone:** experimental. The model takes 17.7 ms a frame (21.5 ms p99)
   on an iPhone 17 Pro's Neural Engine and the Swift server passes the parity gate on an M1 Pro.
-  The link to the comma and driving are not yet tested. See
+  Over one USB cable to the comma, zoompilot's parked live bench ran every
+  frame on the phone at 39.1 ms p99. Driving is not yet tested. See
   [ios/README.md](../ios/README.md).
 
 ## Measured performance
