@@ -119,7 +119,11 @@ cable > comma, the comma as a USB network adapter), parked:
 In the live bench the comma's real cameras and modeld ran with controls
 off. Every frame came from the large model on the phone, with none dropped
 and one over 50 ms. The comma's own small model takes 24.9 ms a frame there.
-About 19 ms of each round trip is the cable, which runs at USB 2.0 speed.
+About 19 ms of each round trip is the link, although it runs at USB 3.0
+(the comma's controller reports `super-speed`), where the frame's 533 KB
+would take about 1 ms on the wire. The rest is overhead on the way, most
+likely the comma's network driver or socket buffers, and is not yet
+tracked down.
 
 The first build, with the policy on the GPU, measured 66 ms p99 on the
 Neural Engine setting and 154 ms on the GPU.
